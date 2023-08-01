@@ -4,7 +4,6 @@
 This submodule represents the Exoscale Storage API.
 """
 
-import boto3
 import botocore
 import logging
 from . import API, Resource, APIException, ResourceNotFoundError
@@ -527,51 +526,52 @@ class Bucket(Resource):
             zone=self.zone, bucket=self.name
         )
 
-    def put_file(
-        self, src, dst=None, metadata=None, acl=None, transferConfig=None
-    ):
-        """
-        Store a file in the bucket.
+    # this method uses boto3 only methods
+    # def put_file(
+    #     self, src, dst=None, metadata=None, acl=None, transferConfig=None
+    # ):
+    #     """
+    #     Store a file in the bucket.
 
-        Parameters:
-            src (str): the path to the source file
-            dst (str): a path to which to store the file in the bucket
-            metadata (dict): a dict of metadata to set to the file
-            acl (str): a canned ACL to apply to the file
-            transferConfig (boto3.s3.transfer.TransferConfig): a boto3 transfer
-                configuration
+    #     Parameters:
+    #         src (str): the path to the source file
+    #         dst (str): a path to which to store the file in the bucket
+    #         metadata (dict): a dict of metadata to set to the file
+    #         acl (str): a canned ACL to apply to the file
+    #         transferConfig (boto3.s3.transfer.TransferConfig): a boto3 transfer
+    #             configuration. This fork dodes not support transferConfig
 
-        Returns:
-            BucketFile: the file stored in the bucket
-        """
+    #     Returns:
+    #         BucketFile: the file stored in the bucket
+    #     """
 
-        if dst is None:
-            dst = basename(src)
+    #     if dst is None:
+    #         dst = basename(src)
 
-        extraArgs = {}
-        if metadata:
-            extraArgs["Metadata"] = metadata
-        if acl is not None:
-            if acl not in _SUPPORTED_CANNED_ACLS:
-                raise ValueError(
-                    "unsupported ACL; supported ACLs are: {}".format(
-                        ",".join(_SUPPORTED_CANNED_ACLS)
-                    )
-                )
-            extraArgs["ACL"] = acl
+    #     extraArgs = {}
+    #     if metadata:
+    #         extraArgs["Metadata"] = metadata
+    #     if acl is not None:
+    #         if acl not in _SUPPORTED_CANNED_ACLS:
+    #             raise ValueError(
+    #                 "unsupported ACL; supported ACLs are: {}".format(
+    #                     ",".join(_SUPPORTED_CANNED_ACLS)
+    #                 )
+    #             )
+    #         extraArgs["ACL"] = acl
 
-        try:
-            self.storage.boto.upload_file(
-                Filename=src,
-                Bucket=self.name,
-                Key=dst,
-                ExtraArgs=extraArgs if len(extraArgs) > 0 else None,
-                Config=transferConfig,
-            )
-        except Exception as e:
-            raise APIException(e)
+    #     try:
+    #         self.storage.boto.upload_file(
+    #             Filename=src,
+    #             Bucket=self.name,
+    #             Key=dst,
+    #             ExtraArgs=extraArgs if len(extraArgs) > 0 else None,
+    #             Config=transferConfig,
+    #         )
+    #     except Exception as e:
+    #         raise APIException(e)
 
-        return BucketFile(self.storage, {}, path=dst, bucket=self)
+    #     return BucketFile(self.storage, {}, path=dst, bucket=self)
 
     def list_files(self, prefix=""):
         """
@@ -767,23 +767,38 @@ class StorageAPI(API):
 
         if self.zone is None:
             raise ValueError("no storage zone specified")
+        
+        session = botocore.session.get_session()
 
-        self.boto = boto3.client(
+        self.boto = session.create_client(
             "s3",
             region_name=self.zone,
             endpoint_url=self.endpoint,
             aws_access_key_id=key,
             aws_secret_access_key=secret,
             config=botocore.client.Config(
-                user_agent="{} boto3/{} botocore/{}".format(
-                    self.user_agent, boto3.__version__, botocore.__version__
+                user_agent="{} botocore/{}".format(
+                    self.user_agent, botocore.__version__
                 ),
                 retries={"max_attempts": self.max_retries},
             ),
         )
 
         if trace:
-            boto3.set_stream_logger(name="", level=logging.DEBUG)
+            # this is what  `boto3.set_stream_logger` does
+
+            name = "botocore"
+            level = logging.DEBUG
+            format_string = None
+
+            logger = logging.getLogger(name)
+            logger.setLevel(level)
+            handler = logging.StreamHandler()
+            handler.setLevel(level)
+            formatter = logging.Formatter(format_string)
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+
 
     def __repr__(self):
         return "StorageAPI(endpoint='{}' zone='{}' key='{}')".format(
